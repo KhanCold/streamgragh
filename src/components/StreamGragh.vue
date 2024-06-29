@@ -2,9 +2,10 @@
   <div class="stream-graph">
     <input type="file" @change="handleFileChange" />
     <svg :width="width" :height="height">
-      <path @mouseover="handleMouseover"
+      <path @mouseover="handleMouseover" @mouseout="handleMouseout"  
         v-for="(path, index) in paths"
         :key="index"
+        :class="{ 'mask-effect': isHover(path.name) }"
         :d="path.d"
         :fill="path.color"
         :title="path.name"
@@ -150,7 +151,7 @@ export default {
     let result = Object.entries(completedLine).map(([key, value]) => ({ year: parseInt(key), n: value }));
     newLines[name] = result;})
 
-    console.log('补全后的数据',JSON.parse(JSON.stringify(newLines))); // 打印补全后的数据
+    // console.log('补全后的数据',JSON.parse(JSON.stringify(newLines))); // 打印补全后的数据
 
     return newLines;
     },
@@ -218,9 +219,16 @@ export default {
       return paths;
 
     },
-    handleMouseover(event) { // 处理悬浮事件  显示到页面上当前选中的名字
+    handleMouseover(event) { // 处理悬浮事件  显示到页面上当前选中的名字 并且蒙版
     this.selectedName = event.target.getAttribute('title');
     },
+    handleMouseout() { // 处理鼠标移出事件  隐藏蒙版
+    this.selectedName = '';
+    },
+    isHover(name) { // 判断是否在蒙版上 
+      if (this.selectedName === '') return false;//如果没有选中任何人，则不显示蒙版
+      return this.selectedName !== name;
+    }
 }}
 </script>
 
@@ -237,6 +245,11 @@ export default {
   position: relative;
   width: 1000px;
   height: 600px;
+}
+
+.mask-effect {
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
 }
 
 </style>
