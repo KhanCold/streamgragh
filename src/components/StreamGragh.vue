@@ -1,5 +1,7 @@
+html
+复制代码
 <template>
-  <div class="stream-graph">
+  <div class="stream-graph" @wheel="handleWheel">
     <input type="file" @change="handleFileChange" />
     <svg :width="width" :height="height">
       <path @mouseover="handleMouseover" @mouseout="handleMouseout"  
@@ -34,6 +36,7 @@ export default {
       minYear: 0, // 开始的年份
       maxYear: 0, // 结束的年份
       yScale: 300000, // 初始缩放因子（0-200，000）
+      xScaleFactor: 1, // x轴缩放因子
     };
   },
   methods: {
@@ -66,34 +69,34 @@ export default {
         });
       });
     },
-    scaleData(data) {//缩放数据
-    let xScale = this.maxYear - this.minYear;
+    scaleData(data) { // 缩放数据
+      let xScale = this.maxYear - this.minYear;
 
-    data.forEach(d => {
-      d.n = d.n / this.yScale * this.height;
-      d.year = (parseFloat(d.year)  - this.minYear) / xScale * this.width;// 将字符串转换为数字
-    });
-    return data;
+      data.forEach(d => {
+        d.n = d.n / this.yScale * this.height;
+        d.year = (parseFloat(d.year)  - this.minYear) / xScale * this.width * this.xScaleFactor; // 乘以缩放因子
+      });
+      return data;
     },
     getAllNames(data) { // 获取所有婴儿的姓名
       const names = [];
       data.forEach(d => {
-      if (!names.includes(d.name)) {
-        names.push(d.name);
-      }
-    });
-    return names;
+        if (!names.includes(d.name)) {
+          names.push(d.name);
+        }
+      });
+      return names;
     },
     getYearSum(data) { // 获取年份总数 
-    let yearSum = [];
+      let yearSum = [];
       data.forEach(d => {
-          let nValue = parseInt(d.n); // 将字符串转换为数字
-          let yearIndex = yearSum.findIndex(entry => entry.year === d.year);
-          if (yearIndex === -1) {
-              yearSum.push({ year: d.year, n: nValue });
-          } else {
-              yearSum[yearIndex].n += nValue;
-          }
+        let nValue = parseInt(d.n); // 将字符串转换为数字
+        let yearIndex = yearSum.findIndex(entry => entry.year === d.year);
+        if (yearIndex === -1) {
+          yearSum.push({ year: d.year, n: nValue });
+        } else {
+          yearSum[yearIndex].n += nValue;
+        }
       });
 
       this.minYear = parseInt(yearSum[0].year);
@@ -102,58 +105,57 @@ export default {
       return yearSum;
     },
     getPathTop(data) { // 获取路径的最上边计算公式：（this.height-this.yearSum）/2
-    let pathTop = [];
+      let pathTop = [];
       data.forEach(d => { pathTop.push({ year: d.year, n: (this.height - d.n) / 2 }); });
-    return pathTop;
+      return pathTop;
     },
     transformData(originalData) { // 转换数据
-        // 创建一个空对象来存储转换后的数据
-        const transformedData = {};
+      // 创建一个空对象来存储转换后的数据
+      const transformedData = {};
 
-        // 遍历原始数据
-        originalData.forEach(item => {
-          // 检查转换后的对象中是否已经存在该名字的数组
-          if (!transformedData[item.name]) {
-            transformedData[item.name] = [];
-          }
+      // 遍历原始数据
+      originalData.forEach(item => {
+        // 检查转换后的对象中是否已经存在该名字的数组
+        if (!transformedData[item.name]) {
+          transformedData[item.name] = [];
+        }
 
-          // 将原始数据项添加到对应的数组中
-          transformedData[item.name].push({
-            year: parseInt(item.year), // 将年份转换为整数
-            n: parseInt(item.n) // 将数量转换为整数
-          });
+        // 将原始数据项添加到对应的数组中
+        transformedData[item.name].push({
+          year: parseInt(item.year), // 将年份转换为整数
+          n: parseInt(item.n) // 将数量转换为整数
         });
+      });
 
-        // 输出转换后的数据
-        // console.log(transformedData);
+      // 输出转换后的数据
+      // console.log(transformedData);
 
-        return transformedData;
+      return transformedData;
     },
     completeLines(lines) { // 补全缺失的年份数据
-
       let newLines = {};
 
       Object.keys(lines).forEach(name => {
-      let line = lines[name];
+        let line = lines[name];
 
-      // 创建一个从minYear到maxYear的年份范围数组
+        // 创建一个从minYear到maxYear的年份范围数组
+        let years = Array.from({ length: this.maxYear - this.minYear + 1 }, (_, i) => this.minYear + i);  
+        // 使用reduce方法构建一个新对象，包含所有年份和对应的n值（如果不存在则为0）
+        let completedLine = years.reduce((acc, year) => {
+          // 查找当前年份是否存在于原始数据中
+          let existingData = line.find(data => data.year === year);
+          // 如果存在，使用原始的n值；如果不存在，设置n为0
+          acc[year] = existingData ? existingData.n : 0;
+          return acc;
+        }, {});
 
-      let years = Array.from({ length: this.maxYear - this.minYear + 1 }, (_, i) => this.minYear + i);  
-      // 使用reduce方法构建一个新对象，包含所有年份和对应的n值（如果不存在则为0）
-      let completedLine = years.reduce((acc, year) => {
-      // 查找当前年份是否存在于原始数据中
-      let existingData = line.find(data => data.year === year);
-      // 如果存在，使用原始的n值；如果不存在，设置n为0
-      acc[year] = existingData ? existingData.n : 0;
-      return acc;
-    }, {});
+        let result = Object.entries(completedLine).map(([key, value]) => ({ year: parseInt(key), n: value }));
+        newLines[name] = result;
+      });
 
-    let result = Object.entries(completedLine).map(([key, value]) => ({ year: parseInt(key), n: value }));
-    newLines[name] = result;})
+      // console.log('补全后的数据',JSON.parse(JSON.stringify(newLines))); // 打印补全后的数据
 
-    // console.log('补全后的数据',JSON.parse(JSON.stringify(newLines))); // 打印补全后的数据
-
-    return newLines;
+      return newLines;
     },
     computedLines(lines, pathTop) { // 计算路径数据
       // 创建一个空数组来存储路径数据
@@ -161,75 +163,87 @@ export default {
       let index = 0;
       // 遍历姓名数组
       Object.keys(lines).forEach(name => {
-          // 获取对应姓名的路径点数组
-          let points = lines[name];
-          // 创建一个空数组来存储路径数据=> {name:name,d:path,color:color}
-          let path = {};  
-          let bottomLine = [];//图形的底部
-          let topLine = [];//图形的顶部
-          // 遍历路径点数组
-          for (let i = 0; i < points.length; i++) {
-              // 计算当前路径点的位置
-              let x = points[i].year;
-              let y = points[i].n + pathTop[i].n;
-              // 如果是第一个路径点，则移动到第一个路径点的位置
-              if (i === 0) {
-                //先初始化为空
-                  bottomLine = [];//图形的底部
-                  topLine = [];//图形的顶部
-                  topLine.push(`M${x},${y}`);
-              } else {
-                  topLine.push(`L${x},${pathTop[i].n}`) ;
-                  bottomLine.unshift(`L${x},${y}`);//底部边是回来的
-              }
-              pathTop[i].n = y;//更新pathTop数组
+        // 获取对应姓名的路径点数组
+        let points = lines[name];
+        // 创建一个空数组来存储路径数据=> {name:name,d:path,color:color}
+        let path = {};  
+        let bottomLine = [];//图形的底部
+        let topLine = [];//图形的顶部
+        // 遍历路径点数组
+        for (let i = 0; i < points.length; i++) {
+          // 计算当前路径点的位置
+          let x = points[i].year;
+          let y = points[i].n + pathTop[i].n;
+          // 如果是第一个路径点，则移动到第一个路径点的位置
+          if (i === 0) {
+            //先初始化为空
+            bottomLine = [];//图形的底部
+            topLine = [];//图形的顶部
+            topLine.push(`M${x},${y}`);
+          } else {
+            topLine.push(`L${x},${pathTop[i].n}`);
+            bottomLine.unshift(`L${x},${y}`);//底部边是回来的
           }
-          // 为路径添加名字和颜色属性
-          path.name = name;
-          path.d = topLine.join('') + bottomLine.join('');//生成路径字符串
-          path.color = this.colors[index % this.colors.length];
-          index ++;
-          // 将路径数组添加到路径数据数组中
-          paths.push(path);
-    });
+          pathTop[i].n = y;//更新pathTop数组
+        }
+        // 为路径添加名字和颜色属性
+        path.name = name;
+        path.d = topLine.join('') + bottomLine.join('');//生成路径字符串
+        path.color = this.colors[index % this.colors.length];
+        index++;
+        // 将路径数组添加到路径数据数组中
+        paths.push(path);
+      });
       return paths;
     },
     processedData(rawData) { // 处理数据
-    //将原始数据按年份排序
-    let sortedData = rawData.slice().sort((a, b) => a.year - b.year);
-    //将表头去除
-    sortedData.shift();
-    // 转换数据格式=> {name:[{year:n},{year:n}...]}
-    let lines = this.transformData(sortedData); 
-    //拿到每年的总和=> [{year:sum}]
-    this.yearSum = this.getYearSum(sortedData);
-    // 将lines中每个数据项中缺失的年份补全,统一设置为0
-    lines = this.completeLines(lines);
-    //对数据进行缩放成合适的大小
-    let scaledLines = {};
-    Object.keys(lines).forEach(name => {
-      scaledLines[name] = this.scaleData(lines[name]);
-    });
-    //绘制开始的最上边  计算公式：（this.height-yearSum）/2
-    let pathTop = this.getPathTop(this.scaleData(this.yearSum));
-    //遍历排序后的数据，为每个姓名生成路径点 转换为SVG路径字符串
-    let paths = this.computedLines(scaledLines, pathTop);
+      //将原始数据按年份排序
+      let sortedData = rawData.slice().sort((a, b) => a.year - b.year);
+      //将表头去除
+      sortedData.shift();
+      // 转换数据格式=> {name:[{year:n},{year:n}...]}
+      let lines = this.transformData(sortedData); 
+      //拿到每年的总和=> [{year:sum}]
+      this.yearSum = this.getYearSum(sortedData);
+      // 将lines中每个数据项中缺失的年份补全,统一设置为0
+      lines = this.completeLines(lines);
+      //对数据进行缩放成合适的大小
+      let scaledLines = {};
+      Object.keys(lines).forEach(name => {
+        scaledLines[name] = this.scaleData(lines[name]);
+      });
+      //绘制开始的最上边  计算公式：（this.height-yearSum）/2
+      let pathTop = this.getPathTop(this.scaleData(this.yearSum));
+      //遍历排序后的数据，为每个姓名生成路径点 转换为SVG路径字符串
+      let paths = this.computedLines(scaledLines, pathTop);
 
       // 返回SVG路径字符串数组
       return paths;
-
     },
     handleMouseover(event) { // 处理悬浮事件  显示到页面上当前选中的名字 并且蒙版
-    this.selectedName = event.target.getAttribute('title');
+      this.selectedName = event.target.getAttribute('title');
     },
     handleMouseout() { // 处理鼠标移出事件  隐藏蒙版
-    this.selectedName = '';
+      this.selectedName = '';
     },
     isHover(name) { // 判断是否在蒙版上 
       if (this.selectedName === '') return false;//如果没有选中任何人，则不显示蒙版
       return this.selectedName !== name;
+    },
+    handleWheel(event) { // 处理滚轮事件  缩放
+      if (event.ctrlKey) {
+        event.preventDefault();
+        const zoomIntensity = 0.1;
+        if (event.deltaY < 0) {
+          this.xScaleFactor += zoomIntensity;
+        } else {
+          this.xScaleFactor = Math.max(1, this.xScaleFactor - zoomIntensity);
+        }
+        this.paths = this.processedData(this.rawData);
+      }
     }
-}}
+  }
+}
 </script>
 
 <style scoped>
