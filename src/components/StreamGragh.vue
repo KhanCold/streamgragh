@@ -3,7 +3,8 @@ html
 <template>
   <div class="stream-graph" @wheel="handleWheel">
     <input type="file" @change="handleFileChange" />
-    <svg :width="width" :height="height">
+    <button @click="reset">重置画面</button>
+    <svg :width="width" :height="height" ref="svg" @mousedown="handleMouseDown" >
       <path @mouseover="handleMouseover" @mouseout="handleMouseout"  
         v-for="(path, index) in paths"
         :key="index"
@@ -13,6 +14,15 @@ html
         :title="path.name"
         stroke="none"
       /> 
+       <!-- 用于显示选区框 -->
+      <rect
+        v-if="isSelecting"
+        :x="selectionBox.x"
+        :y="selectionBox.y"
+        :width="selectionBox.width"
+        :height="selectionBox.height"
+        class="selection-box"
+      />
     </svg>
     <!-- 用于展示当前选中的名字 -->
     <div class="selected-name" v-if="selectedName">{{ selectedName }}</div>
@@ -31,12 +41,21 @@ export default {
       colors: ["#1E90FF", "#0000FF", "#0000CD", "#00008B", "#4169E1", "#6495ED", "#4682B4", "#2F4F4F", "#2A52BE", "#3A5FCD"],
       rawData: [], // 原始数据
       paths: [], // 路径数据
+      lines: {}, // 转换后并补全后的数据 {name:[{year:n},{year:n}...]}
       yearSum: {}, // 年份总数 { year: sum }
       selectedName: '', // 当前选中的名字
       minYear: 0, // 开始的年份
       maxYear: 0, // 结束的年份
-      yScale: 300000, // 初始缩放因子（0-200，000）
+      minValue: 100000, // 最小值
+      maxValue: 0, // 最大值
       xScaleFactor: 1, // x轴缩放因子
+      yScaleFactor: 1, // y轴缩放因子
+      mouseXOffset: 0, // x坐标偏移量
+      mouseYOffset: 0, // y坐标偏移量
+      isSelecting: false, // 是否正在选择
+      selectionBox: { x: 0, y: 0, width: 0, height: 0 }, // 选区框数据
+      startX: 0, // 鼠标按下时的x坐标
+      startY: 0 // 鼠标按下时的y坐标
     };
   },
   methods: {
@@ -69,24 +88,6 @@ export default {
         });
       });
     },
-    scaleData(data) { // 缩放数据
-      let xScale = this.maxYear - this.minYear;
-
-      data.forEach(d => {
-        d.n = d.n / this.yScale * this.height;
-        d.year = (parseFloat(d.year)  - this.minYear) / xScale * this.width * this.xScaleFactor; // 乘以缩放因子
-      });
-      return data;
-    },
-    getAllNames(data) { // 获取所有婴儿的姓名
-      const names = [];
-      data.forEach(d => {
-        if (!names.includes(d.name)) {
-          names.push(d.name);
-        }
-      });
-      return names;
-    },
     getYearSum(data) { // 获取年份总数 
       let yearSum = [];
       data.forEach(d => {
@@ -98,18 +99,14 @@ export default {
           yearSum[yearIndex].n += nValue;
         }
       });
-
+      // 计算最小值和最大值
+      this.minValue = Math.min(...yearSum.map(entry => entry.n));
+      this.maxValue = Math.max(...yearSum.map(entry => entry.n));
       this.minYear = parseInt(yearSum[0].year);
       this.maxYear = parseInt(yearSum[yearSum.length - 1].year);
-
       return yearSum;
     },
-    getPathTop(data) { // 获取路径的最上边计算公式：（this.height-this.yearSum）/2
-      let pathTop = [];
-      data.forEach(d => { pathTop.push({ year: d.year, n: (this.height - d.n) / 2 }); });
-      return pathTop;
-    },
-    transformData(originalData) { // 转换数据
+    transformData(originalData) { // 转换数据=> {name:[{year:n},{year:n}...]}
       // 创建一个空对象来存储转换后的数据
       const transformedData = {};
 
@@ -127,9 +124,6 @@ export default {
         });
       });
 
-      // 输出转换后的数据
-      // console.log(transformedData);
-
       return transformedData;
     },
     completeLines(lines) { // 补全缺失的年份数据
@@ -145,7 +139,7 @@ export default {
           // 查找当前年份是否存在于原始数据中
           let existingData = line.find(data => data.year === year);
           // 如果存在，使用原始的n值；如果不存在，设置n为0
-          acc[year] = existingData ? existingData.n : 0;
+          acc[year] = existingData ? existingData.n : 0, this.minValue = 0;
           return acc;
         }, {});
 
@@ -153,27 +147,37 @@ export default {
         newLines[name] = result;
       });
 
-      // console.log('补全后的数据',JSON.parse(JSON.stringify(newLines))); // 打印补全后的数据
-
       return newLines;
-    },
-    computedLines(lines, pathTop) { // 计算路径数据
+    }, 
+    getPathTop(data) { // 获取路径的最上边计算公式：（this.height-this.yearSum / (this.maxValue - this.minValue)) * this.height）/ 2 这个yScaleFactor要乘在外面
+      let pathTop = [];
+      data.forEach(d => { pathTop.push({ year: d.year, n: (this.height - d.n / (this.maxValue - this.minValue) * this.height ) / 2 * this.yScaleFactor + this.mouseYOffset}); });
+      return pathTop;
+    },   
+    computedLines() { // 计算路径数据
+      //绘制开始的最上边  计算公式：（this.height-yearSum）/2
+      let pathTop = this.getPathTop(this.yearSum);
       // 创建一个空数组来存储路径数据
       let paths = [];
       let index = 0;
       // 遍历姓名数组
-      Object.keys(lines).forEach(name => {
+      Object.keys(this.lines).forEach(name => {
         // 获取对应姓名的路径点数组
-        let points = lines[name];
+        let points = this.lines[name];
         // 创建一个空数组来存储路径数据=> {name:name,d:path,color:color}
         let path = {};  
         let bottomLine = [];//图形的底部
         let topLine = [];//图形的顶部
         // 遍历路径点数组
         for (let i = 0; i < points.length; i++) {
-          // 计算当前路径点的位置
-          let x = points[i].year;
-          let y = points[i].n + pathTop[i].n;
+          //缩放操作
+          let xScale = this.maxYear - this.minYear;
+          let x = (points[i].year - this.minYear) / xScale * this.width * this.xScaleFactor;
+          let y = (points[i].n - this.minValue) / (this.maxValue - this.minValue) * this.height * this.yScaleFactor;
+          // 计算操作
+          y = y + pathTop[i].n;
+          x = x + this.mouseXOffset;
+
           // 如果是第一个路径点，则移动到第一个路径点的位置
           if (i === 0) {
             //先初始化为空
@@ -194,6 +198,8 @@ export default {
         // 将路径数组添加到路径数据数组中
         paths.push(path);
       });
+      //打印路径数据
+      console.log(JSON.parse(JSON.stringify(paths)));
       return paths;
     },
     processedData(rawData) { // 处理数据
@@ -202,23 +208,13 @@ export default {
       //将表头去除
       sortedData.shift();
       // 转换数据格式=> {name:[{year:n},{year:n}...]}
-      let lines = this.transformData(sortedData); 
-      //拿到每年的总和=> [{year:sum}]
+      this.lines = this.transformData(sortedData); 
+      //拿到每年的总和和开始年份和结束年份=> [{year:sum}]
       this.yearSum = this.getYearSum(sortedData);
       // 将lines中每个数据项中缺失的年份补全,统一设置为0
-      lines = this.completeLines(lines);
-      //对数据进行缩放成合适的大小
-      let scaledLines = {};
-      Object.keys(lines).forEach(name => {
-        scaledLines[name] = this.scaleData(lines[name]);
-      });
-      //绘制开始的最上边  计算公式：（this.height-yearSum）/2
-      let pathTop = this.getPathTop(this.scaleData(this.yearSum));
-      //遍历排序后的数据，为每个姓名生成路径点 转换为SVG路径字符串
-      let paths = this.computedLines(scaledLines, pathTop);
-
-      // 返回SVG路径字符串数组
-      return paths;
+      this.lines = this.completeLines(this.lines);
+      // 计算路径数据对原始数据进行缩放以及重新定位
+      return this.computedLines();
     },
     handleMouseover(event) { // 处理悬浮事件  显示到页面上当前选中的名字 并且蒙版
       this.selectedName = event.target.getAttribute('title');
@@ -227,21 +223,99 @@ export default {
       this.selectedName = '';
     },
     isHover(name) { // 判断是否在蒙版上 
-      if (this.selectedName === '') return false;//如果没有选中任何人，则不显示蒙版
+      if (this.selectedName === '' || this.isSelecting) return false;//如果没有选中任何人或者当前正在框选，则不显示蒙版
       return this.selectedName !== name;
     },
-    handleWheel(event) { // 处理滚轮事件  缩放
+    handleWheel(event) { // 处理滚轮事件  缩放 同时得到鼠标的x坐标，作为缩放中心
       if (event.ctrlKey) {
         event.preventDefault();
-        const zoomIntensity = 0.1;
-        if (event.deltaY < 0) {
+        //鼠标x的坐标是相对于svg的，需要减去svg的初始坐标
+        let mouseX = event.clientX -  this.$refs.svg.getBoundingClientRect().left;
+        let s = this.xScaleFactor;
+        // console.log('mouseX', mouseX);
+        let zoomIntensity = 0.1;
+        if (event.deltaY < 0) {// 放大
           this.xScaleFactor += zoomIntensity;
-        } else {
-          this.xScaleFactor = Math.max(1, this.xScaleFactor - zoomIntensity);
+        } else {// 缩小
+          this.xScaleFactor = Math.max(this.xScaleFactor - zoomIntensity, 0.1);
         }
-        this.paths = this.processedData(this.rawData);
+        // 计算公式
+        //绘制x（mouseX） = pointX * xScale + mouseXOffset
+        //绘制x'(mouseX') = pointX * xScale' + mouseXOffset'
+        //要保持x' = x，则有：
+        //mouseXOffset' = (xScle - xScale') * mouseX + mouseXOffset
+        //mouseXOffset' = mouseX - xScale' * mouseX
+        //pointX = (mouseX - this.mouseXOffset) / s
+        this.mouseXOffset = mouseX - (mouseX - this.mouseXOffset) / s * this.xScaleFactor;
+        //计算错误公式，也能实现缩放，但是转换鼠标位置时会有奇怪的问题
+        // this.mouseXOffset = -mouseX * (this.xScaleFactor - 1);
+        // console.log('mouseXOffset', this.mouseXOffset);
+        this.paths = this.computedLines();
       }
-    }
+    },
+    handleMouseDown(event) { // 处理鼠标按下事件  开始框选 并添加两个监听事件 mousemove 和 mouseup
+      if (event.ctrlKey) {
+        event.preventDefault();
+        this.startX = event.clientX - this.$refs.svg.getBoundingClientRect().left;
+        this.startY = event.clientY - this.$refs.svg.getBoundingClientRect().top;
+        this.isSelecting = true;
+        window.addEventListener('mousemove', this.handleMouseMove);
+        window.addEventListener('mouseup', this.handleMouseUp);
+      }
+    },
+    handleMouseMove(event) { // 处理鼠标移动事件  显示框选框
+      let currentX = event.clientX - this.$refs.svg.getBoundingClientRect().left;
+      let currentY = event.clientY - this.$refs.svg.getBoundingClientRect().top;
+      let x = Math.min(this.startX, currentX);
+      let y = Math.min(this.startY, currentY);
+      let width = Math.abs(this.startX - currentX);
+      let height = Math.abs(this.startY - currentY);
+      this.selectionBox = { x, y, width, height };
+    },
+    handleMouseUp() { // 处理鼠标松开事件  结束框选 并移除两个监听事件 mousemove 和 mouseup
+      this.isSelecting = false;
+      // this.selectionBox = { x: 0, y: 0, width: 0, height: 0 };
+      window.removeEventListener('mousemove', this.handleMouseMove);
+      window.removeEventListener('mouseup', this.handleMouseUp);
+      this.updateSelectedArea();
+    },
+    updateSelectedArea() { // 更新选中的区域, 将展示区域转换为这个
+  // 打印 selectionBox
+  console.log('selectionBox', JSON.parse(JSON.stringify(this.selectionBox)));
+  
+  // x轴计算公式
+  // 绘制 x（mouseX） = pointX * xScale + mouseXOffset
+  // 绘制 x'(mouseX') = pointX * xScale' + mouseXOffset'
+  // 要使 x' = 0，则有：
+  // x'(mouseX') = pointX * xScale' + mouseXOffset' = 0
+  // mouseXOffset' = -pointX * xScale'
+  // pointX = (mouseX - this.mouseXOffset) / s
+  let s = this.xScaleFactor;
+  this.xScaleFactor = this.xScaleFactor * (this.width / this.selectionBox.width);
+  let pointX = (this.selectionBox.x - this.mouseXOffset) / s;
+  this.mouseXOffset = -pointX * this.xScaleFactor;
+
+  // y 轴计算公式
+  //但是y轴的mouseYOffset是给pathTop加的，否则负数相加pathTop更新会有错误
+  let yScle = this.yScaleFactor;
+  this.yScaleFactor = this.yScaleFactor * (this.height / this.selectionBox.height);
+  let pointY = (this.selectionBox.y - this.mouseYOffset) / yScle;
+  this.mouseYOffset = -pointY * this.yScaleFactor;
+
+  this.paths = this.computedLines();
+},
+    reset(){//按下重置画面
+      if(!this.paths.length) return;
+      this.xScaleFactor= 1, // x轴缩放因子
+      this.yScaleFactor= 1, // y轴缩放因子
+      this.mouseXOffset= 0, // x坐标偏移量
+      this.mouseYOffset= 0, // y坐标偏移量
+      this.isSelecting= false, // 是否正在选择
+      this.selectionBox= { x: 0, y: 0, width: 0, height: 0 }, // 选区框数据
+      this.startX= 0, // 鼠标按下时的x坐标
+      this.startY= 0 // 鼠标按下时的y坐标
+      this.paths = this.computedLines();
+    },
   }
 }
 </script>
@@ -265,5 +339,12 @@ export default {
   opacity: 0.5;
   transition: opacity 0.3s ease;
 }
+
+.selection-box {
+  fill: rgba(128, 128, 128, 0.3); 
+  stroke: #808080; 
+  stroke-width: 1;
+}
+
 
 </style>
