@@ -1,6 +1,6 @@
 # streamgragh
 
-![alt text](Snipaste_2024-08-15_22-46-21.jpg)
+![alt text](2.jpg)
 
 ## Project setup
 
